@@ -1,0 +1,5 @@
+fastapi==0.116.0
+pydantic==2.5.2
+requests==2.32.1
+dotenv
+uvicorn==0.32.0
