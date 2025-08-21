@@ -10,7 +10,7 @@ load_dotenv()
 app = FastAPI()
 
 origins = [
-    "https://www.qahelper.ru",  # Ваш фронтенд
+    "https://www.qahelper.ru",
     "http://localhost:3000",
     "https://qahelper.ru"
     ]
@@ -19,9 +19,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],  # Разрешить все методы
-    allow_headers=["*"],  # Разрешить все заголовки
-    expose_headers=["*"]  # Важно для кастомных заголовков
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 
