@@ -1,6 +1,4 @@
-from urllib.request import Request
-
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
@@ -12,11 +10,10 @@ load_dotenv()
 app = FastAPI()
 
 origins = [
-    "https://localhost:3000",  # Ваш фронтенд
-    "http://localhost:3000",  # На случай HTTP
-    "https://127.0.0.1:3000",
-    "http://127.0.0.1:3000",
-]
+    "https://www.qahelper.ru",  # Ваш фронтенд
+    "http://localhost:3000",
+    "https://qahelper.ru"
+    ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,30 +28,7 @@ app.add_middleware(
 class RequestData(BaseModel):
     message: str
 
-
-promp = """
-На основе ТЗ создай тест-кейсы в STRICT MARKDOWN FORMAT.
-
-Шаблон для тест-кейсов:
-### Тест-кейс 1: {название}
-**ID:** TC-001  
-**Приоритет:** Высокий  
-**Шаги:**  
-1. {шаг 1}  
-2. {шаг 2}  
-**Ожидаемый результат:**  
-{результат}  
-
-Правила:
-1. Сохрани ВСЕ данные из ТЗ
-2. Строго следуй шаблону
-3. Не добавляй дополнительные тексты
-Представь данные в виде списка с фиксированным выравниванием:
-- Используй символ • для пунктов
-- После двоеточия 20 пробелов для выравнивания
-- Переноси строки с отступом 25 пробелов
-- Максимальная ширина блока: 70 символов
-"""
+promp = os.getenv('promp')
 
 
 @app.post("/ask")
@@ -90,14 +64,7 @@ async def ping():
     return {"status": "ok", "message": "pong"}
 
 
-@app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "https://localhost:3000"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
+
 
 @app.options("/ask", include_in_schema=False)
 async def options_ask():
