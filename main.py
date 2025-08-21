@@ -104,10 +104,5 @@ async def options_ask():
     return JSONResponse(content={}, status_code=200)
 
 if __name__ == "__main__":
-    uvicorn.run(
-        app,
-        host="127.0.0.1",
-        port=5000,
-        #ssl_keyfile="E:/proect/tcasemaker/ssl/localhost+2-key.pem",
-        #ssl_certfile="E:/proect/tcasemaker/ssl/localhost+2.pem"
-    )
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
