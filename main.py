@@ -98,24 +98,22 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 @app.post("/upload/file")
 async def upload_file(file: UploadFile = File(...)):
     try:
-        # Проверяем тип файла
-        allowed_extensions = {'.txt', '.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif'}
-        file_extension = Path(file.filename).suffix.lower()
-
-        if file_extension not in allowed_extensions:
-            raise HTTPException(status_code=400, detail="Недопустимый тип файла")
-
         # Сохраняем файл
         file_path = UPLOAD_DIR / file.filename
 
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
+        # Проверяем MIME-тип после сохранения
+        validate_file_type(file_path)
+
         return {
             "message": "Файл успешно загружен",
             "filename": file.filename,
             "file_url": f"/uploads/{file.filename}"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при загрузке файла: {str(e)}")
 
