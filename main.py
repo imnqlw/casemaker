@@ -1,17 +1,20 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
 import os
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse
-import shutil
-from pathlib import Path
+import uvicorn
+import io
+import PyPDF2  # для обработки PDF
+import docx2txt  # для обработки DOCX
+from PIL import Image  # для обработки изображений
+import pytesseract  # для OCR
 
 load_dotenv()
 app = FastAPI()
 
+# Настройки CORS
 origins = [
     "https://www.qahelper.ru",
     "http://localhost:3000",
@@ -32,6 +35,62 @@ class RequestData(BaseModel):
     message: str
 
 
+# Функция для извлечения текста из файла
+async def extract_text_from_file(file: UploadFile):
+    content = await file.read()
+    file_extension = file.filename.split('.')[-1].lower()
+
+    if file_extension == 'txt':
+        return content.decode('utf-8')
+    elif file_extension == 'pdf':
+        # Обработка PDF
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+        return text
+    elif file_extension in ['docx', 'doc']:
+        # Обработка DOCX/DOC
+        return docx2txt.process(io.BytesIO(content))
+    elif file_extension in ['jpg', 'jpeg', 'png']:
+        # OCR для изображений
+        image = Image.open(io.BytesIO(content))
+        text = pytesseract.image_to_string(image)
+        return text
+    else:
+        raise HTTPException(status_code=400, detail="Неподдерживаемый формат файла")
+
+
+@app.post("/process-file")
+async def process_file(file: UploadFile = File(...)):
+    try:
+        # Извлекаем текст из файла
+        text_content = await extract_text_from_file(file)
+
+        # Отправляем текст в API для генерации тест-кейсов
+        url = "https://api.intelligence.io.solutions/api/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.getenv('api')}"
+        }
+        payload = {
+            "model": "deepseek-ai/DeepSeek-R1-0528",
+            "messages": [
+                {"role": "system", "content": os.getenv('promt')},
+                {"role": "user", "content": text_content}
+            ]
+        }
+
+        response = requests.post(url, headers=headers, json=payload)
+        data = response.json()
+        text = data["choices"][0]["message"]["content"]
+
+        return {"answer": text.split("</think>")[1] if "</think>" in text else text}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при обработке файла: {str(e)}")
+
+
 @app.post("/ask")
 async def ask_ai(data: RequestData):
     url = "https://api.intelligence.io.solutions/api/v1/chat/completions"
@@ -49,10 +108,7 @@ async def ask_ai(data: RequestData):
     response = requests.post(url, headers=headers, json=payload)
     data = response.json()
     text = data["choices"][0]["message"]["content"]
-    return {"answer": text.split("</think>")[1]}
-
-
-import uvicorn
+    return {"answer": text.split("</think>")[1] if "</think>" in text else text}
 
 
 @app.get("/")
@@ -63,66 +119,6 @@ async def root():
 @app.get("/ping")
 async def ping():
     return {"status": "ok", "message": "pong"}
-
-
-@app.options("/ask", include_in_schema=False)
-async def options_ask():
-    return JSONResponse(content={}, status_code=200)
-
-
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
-
-# Подключите статические файлы для доступа к загруженным файлам
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-
-
-@app.post("/upload/file")
-async def upload_file(file: UploadFile = File(...)):
-    try:
-        # Проверяем расширение файла
-        validate_file_extension(file.filename)
-
-        # Сохраняем файл
-        file_path = UPLOAD_DIR / file.filename
-
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        return {
-            "message": "Файл успешно загружен",
-            "filename": file.filename,
-            "file_url": f"/uploads/{file.filename}"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка при загрузке файла: {str(e)}")
-
-
-
-@app.get("/uploaded/files")
-async def list_uploaded_files():
-    try:
-        files = []
-        for file_path in UPLOAD_DIR.iterdir():
-            if file_path.is_file():
-                files.append({
-                    "name": file_path.name,
-                    "size": file_path.stat().st_size,
-                    "url": f"/uploads/{file_path.name}"
-                })
-        return {"files": files}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка при получении списка файлов: {str(e)}")
-
-
-def validate_file_extension(filename: str):
-    allowed_extensions = {'.txt', '.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif'}
-    file_extension = Path(filename).suffix.lower()
-
-    if file_extension not in allowed_extensions:
-        raise HTTPException(status_code=400, detail="Недопустимый тип файла")
 
 
 if __name__ == "__main__":
