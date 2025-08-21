@@ -3,3 +3,5 @@ pydantic==2.5.2
 requests==2.32.1
 dotenv
 uvicorn==0.32.0
+python-multipart==0.0.20
+python-magic==0.4.27

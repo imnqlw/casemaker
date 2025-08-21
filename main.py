@@ -1,10 +1,28 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
 import os
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
+import shutil
+from pathlib import Path
+import magic
+
+
+def validate_file_type(file_path: Path):
+    mime = magic.Magic(mime=True)
+    file_type = mime.from_file(str(file_path))
+
+    allowed_types = [
+        'image/jpeg', 'image/png', 'image/gif',
+        'application/pdf', 'text/plain'
+    ]
+
+    if file_type not in allowed_types:
+        os.remove(file_path)
+        raise HTTPException(status_code=400, detail="Недопустимый тип файла")
 
 load_dotenv()
 app = FastAPI()
@@ -68,6 +86,54 @@ async def ping():
 @app.options("/ask", include_in_schema=False)
 async def options_ask():
     return JSONResponse(content={}, status_code=200)
+
+
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+# Подключите статические файлы для доступа к загруженным файлам
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+
+@app.post("/upload/file")
+async def upload_file(file: UploadFile = File(...)):
+    try:
+        # Проверяем тип файла
+        allowed_extensions = {'.txt', '.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif'}
+        file_extension = Path(file.filename).suffix.lower()
+
+        if file_extension not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="Недопустимый тип файла")
+
+        # Сохраняем файл
+        file_path = UPLOAD_DIR / file.filename
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        return {
+            "message": "Файл успешно загружен",
+            "filename": file.filename,
+            "file_url": f"/uploads/{file.filename}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при загрузке файла: {str(e)}")
+
+
+@app.get("/uploaded/files")
+async def list_uploaded_files():
+    try:
+        files = []
+        for file_path in UPLOAD_DIR.iterdir():
+            if file_path.is_file():
+                files.append({
+                    "name": file_path.name,
+                    "size": file_path.stat().st_size,
+                    "url": f"/uploads/{file_path.name}"
+                })
+        return {"files": files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении списка файлов: {str(e)}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
