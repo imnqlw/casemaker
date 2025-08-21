@@ -8,21 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 import shutil
 from pathlib import Path
-import magic
-
-
-def validate_file_type(file_path: Path):
-    mime = magic.Magic(mime=True)
-    file_type = mime.from_file(str(file_path))
-
-    allowed_types = [
-        'image/jpeg', 'image/png', 'image/gif',
-        'application/pdf', 'text/plain'
-    ]
-
-    if file_type not in allowed_types:
-        os.remove(file_path)
-        raise HTTPException(status_code=400, detail="Недопустимый тип файла")
 
 load_dotenv()
 app = FastAPI()
@@ -31,7 +16,7 @@ origins = [
     "https://www.qahelper.ru",
     "http://localhost:3000",
     "https://qahelper.ru"
-    ]
+]
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,7 +30,6 @@ app.add_middleware(
 
 class RequestData(BaseModel):
     message: str
-
 
 
 @app.post("/ask")
@@ -81,8 +65,6 @@ async def ping():
     return {"status": "ok", "message": "pong"}
 
 
-
-
 @app.options("/ask", include_in_schema=False)
 async def options_ask():
     return JSONResponse(content={}, status_code=200)
@@ -98,14 +80,14 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 @app.post("/upload/file")
 async def upload_file(file: UploadFile = File(...)):
     try:
+        # Проверяем расширение файла
+        validate_file_extension(file.filename)
+
         # Сохраняем файл
         file_path = UPLOAD_DIR / file.filename
 
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-
-        # Проверяем MIME-тип после сохранения
-        validate_file_type(file_path)
 
         return {
             "message": "Файл успешно загружен",
@@ -116,6 +98,7 @@ async def upload_file(file: UploadFile = File(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при загрузке файла: {str(e)}")
+
 
 
 @app.get("/uploaded/files")
@@ -132,6 +115,15 @@ async def list_uploaded_files():
         return {"files": files}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при получении списка файлов: {str(e)}")
+
+
+def validate_file_extension(filename: str):
+    allowed_extensions = {'.txt', '.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif'}
+    file_extension = Path(filename).suffix.lower()
+
+    if file_extension not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Недопустимый тип файла")
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
