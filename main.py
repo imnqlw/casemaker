@@ -6,19 +6,27 @@ from dotenv import load_dotenv
 import os
 import uvicorn
 import io
-import PyPDF2  # для обработки PDF
-import docx2txt  # для обработки DOCX
-from PIL import Image  # для обработки изображений
-import pytesseract  # для OCR
+import PyPDF2
+import docx
+from PIL import Image
+import pytesseract
+
+# Попробуем подключить pdf2image (если установлен)
+try:
+    from pdf2image import convert_from_bytes
+    PDF2IMAGE_AVAILABLE = True
+except ImportError:
+    PDF2IMAGE_AVAILABLE = False
 
 load_dotenv()
 app = FastAPI()
 
-# Настройки CORS
+# Настройки CORS (для отладки можно оставить * , потом сузить)
 origins = [
     "https://www.qahelper.ru",
     "http://localhost:3000",
-    "https://qahelper.ru"
+    "https://qahelper.ru",
+    "*"
 ]
 
 app.add_middleware(
@@ -40,23 +48,49 @@ async def extract_text_from_file(file: UploadFile):
     content = await file.read()
     file_extension = file.filename.split('.')[-1].lower()
 
-    if file_extension == 'txt':
-        return content.decode('utf-8')
-    elif file_extension == 'pdf':
-        # Обработка PDF
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+    if file_extension == "txt":
+        return content.decode("utf-8", errors="ignore")
+
+    elif file_extension == "pdf":
         text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text()
-        return text
-    elif file_extension in ['docx', 'doc']:
-        # Обработка DOCX/DOC
-        return docx2txt.process(io.BytesIO(content))
-    elif file_extension in ['jpg', 'jpeg', 'png']:
-        # OCR для изображений
-        image = Image.open(io.BytesIO(content))
-        text = pytesseract.image_to_string(image)
-        return text
+        try:
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+            for page in pdf_reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text += extracted
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Ошибка чтения PDF: {str(e)}")
+
+        if text.strip():
+            return text
+
+        # fallback через OCR, если текст не извлекся
+        if PDF2IMAGE_AVAILABLE:
+            try:
+                images = convert_from_bytes(content)
+                ocr_text = ""
+                for img in images:
+                    ocr_text += pytesseract.image_to_string(img)
+                return ocr_text
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"OCR ошибка PDF: {str(e)}")
+        return "Не удалось извлечь текст из PDF"
+
+    elif file_extension in ["docx"]:
+        try:
+            doc = docx.Document(io.BytesIO(content))
+            return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Ошибка чтения DOCX: {str(e)}")
+
+    elif file_extension in ["jpg", "jpeg", "png"]:
+        try:
+            image = Image.open(io.BytesIO(content))
+            return pytesseract.image_to_string(image)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Ошибка OCR изображения: {str(e)}")
+
     else:
         raise HTTPException(status_code=400, detail="Неподдерживаемый формат файла")
 
@@ -67,7 +101,7 @@ async def process_file(file: UploadFile = File(...)):
         # Извлекаем текст из файла
         text_content = await extract_text_from_file(file)
 
-        # Отправляем текст в API для генерации тест-кейсов
+        # Отправляем текст в Intelligence.io API
         url = "https://api.intelligence.io.solutions/api/v1/chat/completions"
         headers = {
             "Content-Type": "application/json",
