@@ -127,22 +127,26 @@ async def process_file(file: UploadFile = File(...)):
 
 @app.post("/ask")
 async def ask_ai(data: RequestData):
-    url = "https://api.intelligence.io.solutions/api/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {os.getenv('api')}"
-    }
-    payload = {
-        "model": "deepseek-ai/DeepSeek-R1-0528",
-        "messages": [
-            {"role": "system", "content": os.getenv('promt')},
-            {"role": "user", "content": data.message}
-        ]
-    }
-    response = requests.post(url, headers=headers, json=payload)
-    data = response.json()
-    text = data["choices"][0]["message"]["content"]
-    return {"answer": text.split("</think>")[1] if "</think>" in text else text}
+    try:
+        url = "https://api.intelligence.io.solutions/api/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.getenv('api')}"
+        }
+        payload = {
+            "model": "deepseek-ai/DeepSeek-R1-0528",
+            "messages": [
+                {"role": "system", "content": os.getenv('promt')},
+                {"role": "user", "content": data.message}
+            ]
+        }
+        response = requests.post(url, headers=headers, json=payload)
+        data = response.json()
+        text = data["choices"][0]["message"]["content"]
+        return {"answer": text.split("</think>")[1] if "</think>" in text else text}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при обработке файла: {str(e)}")
 
 
 @app.get("/")
