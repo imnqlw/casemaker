@@ -10,6 +10,36 @@ import PyPDF2
 import docx
 from PIL import Image
 import pytesseract
+from fastapi import Depends
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from models import User, Chat
+from auth import get_db, get_password_hash, verify_password, create_access_token, get_current_user
+
+@app.post("/register")
+def register(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.username == form_data.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Пользователь уже существует")
+
+    user = User(
+        username=form_data.username,
+        password_hash=get_password_hash(form_data.password)
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"msg": "Пользователь создан"}
+
+@app.post("/login")
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Неверный логин или пароль")
+
+    token = create_access_token({"sub": user.username})
+    return {"access_token": token, "token_type": "bearer"}
+
 
 # Попробуем подключить pdf2image (если установлен)
 try:
@@ -106,12 +136,12 @@ async def extract_text_from_file(file: UploadFile):
 
 
 @app.post("/process-file")
-async def process_file(file: UploadFile = File(...)):
+async def process_file(file: UploadFile = File(...),
+                       current_user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    text_content = await extract_text_from_file(file)
     try:
-        # Извлекаем текст из файла
         text_content = await extract_text_from_file(file)
-
-        # Отправляем текст в Intelligence.io API
         url = "https://api.intelligence.io.solutions/api/v1/chat/completions"
         headers = {
             "Content-Type": "application/json",
@@ -128,6 +158,9 @@ async def process_file(file: UploadFile = File(...)):
         response = requests.post(url, headers=headers, json=payload)
         data = response.json()
         text = data["choices"][0]["message"]["content"]
+        chat = Chat(user_id=current_user.id, message=text_content, response=text)
+        db.add(chat)
+        db.commit()
 
         return {"answer": text.split("</think>")[1] if "</think>" in text else text}
 
@@ -157,6 +190,12 @@ async def ask_ai(data: RequestData):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при обработке файла: {str(e)}")
+
+@app.get("/history")
+def get_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    chats = db.query(Chat).filter(Chat.user_id == current_user.id).order_by(Chat.timestamp.desc()).all()
+    return [{"id": c.id, "message": c.message, "response": c.response, "timestamp": c.timestamp} for c in chats]
+
 
 
 @app.get("/")
